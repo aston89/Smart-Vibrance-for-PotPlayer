@@ -11,6 +11,4 @@ This shader is the equivalent of the NVIDIA "RTX Dynamic Vibrance" new feature a
 The shader is fully commented and configurable, there's should no need for further explanation, in case, just ask.
 Click on the file and then click on download button on the right or copy paste the code into a .txt and put it inside the "pxshader" folder of potplayer root.
 
-
-![alt text]([http://url/to/img.png](https://github.com/aston89/Smart-Vibrance-for-PotPlayer/blob/main/smart_vibrance_preview.jpg
-))
+![alt text](https://github.com/aston89/Smart-Vibrance-for-PotPlayer/blob/main/smart_vibrance_preview.jpg)
