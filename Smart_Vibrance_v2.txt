@@ -1,0 +1,53 @@
+sampler s0 : register(s0);
+float4 p1 : register(c1);
+
+float3 AdjustSaturation(float3 color, float saturation)
+{
+    // Calculate luminance
+    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+
+    // Check if the color is close to grayscale
+    float grayscaleThreshold = 0.05; // Adjust as needed
+    bool isGray = abs(color.x - luminance) < grayscaleThreshold &&
+                  abs(color.y - luminance) < grayscaleThreshold &&
+                  abs(color.z - luminance) < grayscaleThreshold;
+
+    // Calculate chromaticity
+    float3 chromaticity = color - luminance;
+
+    // Calculate original saturation level
+    float originalSaturation = length(chromaticity);
+
+    // Calculate scaling factor based on original saturation
+    float scalingFactor;
+    if (isGray)
+    {
+        // If the color is gray, reduce saturation boost
+        scalingFactor = 0.25; // Adjust as needed
+    }
+    else
+    {
+        scalingFactor = 1.0 - saturate(originalSaturation / 0.5); // Scale between 0 and 1 for saturation above 90%
+    }
+
+    // Adjust chromaticity while preserving its direction and applying scaling factor
+    float3 adjustedChromaticity = chromaticity + (chromaticity * (saturation - 1.0) * scalingFactor);
+
+    // Combine adjusted chromaticity with original luminance
+    float3 adjustedColor = luminance + adjustedChromaticity;
+
+    return adjustedColor;
+}
+
+
+float4 main(float2 texCoord : TEXCOORD) : SV_TARGET
+{
+    // Sample input texture
+    float4 inputColor = tex2D(s0, texCoord);
+
+    // Adjust saturation with rolloff
+    float3 adjustedColor = AdjustSaturation(inputColor.rgb, 2.0); // 1.0 is default, 2,0 is 100% more
+
+    // Return adjusted color with original alpha
+    return float4(adjustedColor, inputColor.a);
+}
