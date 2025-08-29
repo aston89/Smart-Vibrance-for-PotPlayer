@@ -17,7 +17,7 @@ Note :
 This shader was initially created and tuned for FullHD's video but after further testing i've noticed that in some HD/SD anime (and probably some movies) the detection of grayscale was abrupt and caused artifacts so i've updated the logic behind the blending of the saturation scaling factor for grayscales in order to maintain smooth shades transition.
 
 Preview:
-![alt text](https://github.com/aston89/Smart-Vibrance-for-PotPlayer/blob/main/smart_vibrance_preview.jpg)
+![alt text](https://github.com/aston89/Smart-Vibrance-for-PotPlayer/blob/main/preview.jpg)
 
 
 
