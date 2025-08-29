@@ -13,14 +13,11 @@ Click on the file and then click on download button on the right or copy paste t
 
 VideoHelp forum link for discussion : https://forum.videohelp.com/threads/414563-PotPlayer-shader-Smart-Vibrance
 
-UPDATE (V2 released): 
-This shader was initially created and tuned for FullHD's video but after further testing i've noticed that in some HD/SD anime (and probably some movies) the detection of grayscale was abrupt and caused artifacts, i've updated the blending of the saturation scaling factor for grayscales in order to maintain smooth shades transition.
+Note : 
+This shader was initially created and tuned for FullHD's video but after further testing i've noticed that in some HD/SD anime (and probably some movies) the detection of grayscale was abrupt and caused artifacts so i've updated the logic behind the blending of the saturation scaling factor for grayscales in order to maintain smooth shades transition.
 
 Preview:
 ![alt text](https://github.com/aston89/Smart-Vibrance-for-PotPlayer/blob/main/smart_vibrance_preview.jpg)
 
-
-Difference from the original and the V2 update:
-![alt text](https://github.com/aston89/Smart-Vibrance-for-PotPlayer/blob/main/smart_vibrance_v2_preview.jpg)
 
 
