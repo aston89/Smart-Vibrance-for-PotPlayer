@@ -8,7 +8,7 @@ This is a **perceptual color response system** designed to behave differently de
 ## Problem
 There is a fundamental difference between how colors are perceived on TVs and on PC monitors.
 TV manufacturers have spent years competing on one thing:
-> making colors more vivid, brighter, and more eye-catching — without feeling obviously artificial.
+making colors more vivid, brighter, and more eye-catching — without feeling obviously artificial.
 This “vividness race” has shaped the entire ecosystem.
 Over time, content distributors started **reducing native saturation**, knowing that TVs will automatically compensate with built-in enhancement algorithms and smartphones do the same (this is not just about OLED panels).
 So what you actually watch is often, **intentionally toned-down content designed to be “re-inflated” by the display**
