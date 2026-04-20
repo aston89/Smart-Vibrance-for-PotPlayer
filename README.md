@@ -38,14 +38,14 @@ Traditional controls operate globally and linearly which means:
 - they don’t care about *scene composition*
 
 **You are stuck between two extremes:**
-flat and lifeless or overcooked and artificial.
+- flat and lifeless or overcooked and artificial.
 There is no middle ground using standard tools.
 
 **What’s actually needed:**
-Not “more saturation” but a system that "understands" when to push color and when to back off.
+- Not “more saturation” but a system that "understands" when to push color and when to back off.
 
 **Core idea:**
-Instead of applying a linear fixed gain, saturation boost become a function of existing chroma "energy", weak colors are boosted, medium colors are gently enhanced, strong colors are progressively ignored, grey scale is differently preserved and threated.
+- Instead of applying a linear fixed gain, saturation boost become a function of existing chroma "energy", weak colors are boosted, medium colors are gently enhanced, strong colors are progressively ignored, grey scale is differently preserved and threated.
 >This avoids clipping by design, not by correction.
 
 ---
@@ -80,18 +80,19 @@ Result: stable even under aggressive frame boosting pipelines (svp, dmitri-rende
 ## Difference between Base (Smart_vibrance.txt) vs PLUS (Smart_Vibrance_Plus.txt)
 
 **Base version**:
-hard gating thresholds used on gray colors.
-simple gradual rolloff curve for already saturated colors.
-no temporal smoothing.
-Good for anime but not so much for movies (too aggressive in some circumstances).
-Computationally lightweight.
+- hard gating thresholds used on gray colors.
+- simple gradual rolloff curve for already saturated colors.
+- no temporal smoothing.
+- Good for anime but not so much for movies (too aggressive in some circumstances).
+- Computationally lightweight .
 
 **PLUS version:**
-Scene-adaptive parameters (very similar to rtx dynamic vibrance).
-Temporal EMA stabilization (avoiding potential artifacts).
-Dual-scale signal model (safety estimation).
-Fully continuous response (no switching logic, no more hard boolean separation between gray scales)
-Designed for real-world messy content like anime encodes, SDR streaming, mixed-quality libraries.
+- Scene-adaptive parameters (very similar to rtx dynamic vibrance).
+- Temporal EMA stabilization (avoiding potential artifacts).
+- Dual-scale signal model (safety estimation).
+- Fully continuous response (no switching logic, no more hard boolean separation between gray scales)
+- Designed for real-world messy content like anime encodes, SDR streaming, mixed-quality libraries.
+- Computationally more heavy (but still reasonable).
  
 ---
 
