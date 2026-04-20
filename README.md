@@ -13,9 +13,9 @@ This “vividness race” has shaped the entire ecosystem.
 Over time, content distributors started **reducing native saturation**, knowing that TVs will automatically compensate with built-in enhancement algorithms and smartphones do the same (this is not just about OLED panels).
 So what you actually watch is often, **intentionally toned-down content designed to be “re-inflated” by the display**
 
-And then comes the PC...
+And then comes the PC.
 PC monitors play a completely different game, they prioritize color accuracy standards, response time and professional consistency.
-Most of them do NOT include aggressive color enhancement, expose raw or near-raw signal and **vary heavily depending on panel type (IPS vs VA, etc.)**
+Most of them do NOT include aggressive color enhancement, expose raw or near-raw signal and **vary heavily depending on panel type (IPS vs VA, etc.)**.
 Result ? **what looks “balanced” on a TV often looks flat or washed-out on a pc monitor**
 
 It's not just a range issue (16–235 vs 0–255), resizing, compression, SDR pipelines and panel characteristics all contribute to this effect.
