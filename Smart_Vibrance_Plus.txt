@@ -1,0 +1,78 @@
+sampler s0 : register(s0);
+float4 p1 : register(c1);
+
+// previous frame state (must persist between frames)
+float4 pPrev : register(c2);
+
+// basic utility
+float sigmoid(float x)
+{
+    return 1.0 / (1.0 + exp(-x));
+}
+
+// exponential smoothing for temporal stability
+float ema(float prev, float current, float lambda)
+{
+    float a = 1.0 - exp(-lambda);
+    return lerp(prev, current, a);
+}
+
+float3 AdjustColor(float3 color, float intensity, float sceneActivity)
+{
+    // perceptual luminance
+    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+
+    // chroma component
+    float3 chroma = color - luminance;
+
+    float chromaEnergy = dot(chroma, chroma);
+    float chromaMag = sqrt(chromaEnergy);
+
+    // scene adaptive parameters
+    float satRef  = lerp(0.35, 0.65, sceneActivity);
+    float grayRef = lerp(0.006, 0.0015, sceneActivity);
+
+    // saturation rolloff based on existing chroma
+    float normSat = saturate(chromaMag / satRef);
+    float rolloff = 1.0 - normSat;
+
+    // smooth protection for near-neutral colors
+    float graySoft = sigmoid((grayRef - chromaEnergy) * 45.0);
+
+    float response = lerp(rolloff, 1.0, graySoft);
+
+    // intensity scaling
+    float gain = (intensity - 1.0) * response;
+
+    return luminance + chroma + chroma * gain;
+}
+
+float4 main(float2 texCoord : TEXCOORD) : SV_TARGET
+{
+    // sample input frame
+    float4 inputColor = tex2D(s0, texCoord);
+
+    float3 color = inputColor.rgb;
+
+    float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
+    float chromaEnergy = dot(color - luminance, color - luminance);
+
+    // fast scene activity estimate
+    float sceneActivityRaw = saturate(chromaEnergy * 10.0);
+
+    // smoothed scene response
+    float sceneActivity = ema(pPrev.x, sceneActivityRaw, 0.08);
+
+    // micro instability / compression noise estimate
+    float microActivity = ema(pPrev.y, chromaEnergy, 0.25);
+
+    // stability compensation for compressed or boosted input
+    float stabilityBoost = 1.0 - saturate(microActivity * 5.0);
+
+    // final adaptive intensity
+    float intensity = 2.0 * lerp(0.85, 1.0, sceneActivity) * stabilityBoost;
+
+    float3 outColor = AdjustColor(color, intensity, sceneActivity);
+
+    return float4(outColor, inputColor.a);
+}
