@@ -77,7 +77,7 @@ Result: stable even under aggressive frame boosting pipelines (svp, dmitri-rende
 
 ---
 
-## Difference between Base vs PLUS
+## Difference between Base vs PLUS logic
 
 **Base version (Smart_vibrance.txt)**:
 - hard gating thresholds used on gray colors.
