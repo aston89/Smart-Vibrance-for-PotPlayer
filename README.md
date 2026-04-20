@@ -77,16 +77,16 @@ Result: stable even under aggressive frame boosting pipelines (svp, dmitri-rende
 
 ---
 
-## Difference between Base (Smart_vibrance.txt) vs PLUS (Smart_Vibrance_Plus.txt)
+## Difference between Base vs PLUS
 
-**Base version**:
+**Base version (Smart_vibrance.txt)**:
 - hard gating thresholds used on gray colors.
 - simple gradual rolloff curve for already saturated colors.
 - no temporal smoothing.
 - Good for anime but not so much for movies (too aggressive in some circumstances).
 - Computationally lightweight .
 
-**PLUS version:**
+**PLUS version (Smart_Vibrance_Plus.txt):**
 - Scene-adaptive parameters (very similar to rtx dynamic vibrance).
 - Temporal EMA stabilization (avoiding potential artifacts).
 - Dual-scale signal model (safety estimation).
