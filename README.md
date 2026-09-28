@@ -1,5 +1,5 @@
-# Smart Vibrance Shader (PotPlayer, MPC & forks, etc etc)
-A real-time adaptive vibrance system for video playback, inspired by modern dynamic vibrance systems (e.g. NVIDIA RTX Dynamic Vibrance).
+# Smart Vibrance : Base, Plus, Pro (PotPlayer, MPC & forks, etc etc)
+A real-time adaptive vibrance shader for video playback, inspired by modern dynamic vibrance systems (e.g. NVIDIA RTX Dynamic Vibrance).
 Not a saturation filter. Not a LUT. Not a global color boost.
 This is a **perceptual color response system** designed to behave differently depending on what is actually in the frame.
 
