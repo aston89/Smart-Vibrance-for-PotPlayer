@@ -77,31 +77,36 @@ Result: stable even under aggressive frame boosting pipelines (svp, dmitri-rende
 
 ---
 
-## Difference between Base vs PLUS logic
+## Difference between Base vs Plus vs PRO logic
 
-**Base version (Smart_vibrance.txt)**:
-- hard gating thresholds used on gray colors.
-- simple gradual rolloff curve for already saturated colors.
-- no temporal smoothing.
-- Good for anime but not so much for movies (too aggressive in some circumstances).
-- Computationally lightweight .
+**Base version (`Smart_vibrance.txt`):**
+* Hard gating thresholds used on gray / low-chroma colors.
+* Simple gradual rolloff curve for already saturated colors.
+* No temporal smoothing.
+* Strong and straightforward saturation boost with minimal adaptive balancing.
+* Very lightweight computationally.
+* Good for anime and highly stylized content, but can become aggressive on some real-world footage.
 
-**PLUS version (Smart_Vibrance_Plus.txt):**
-- Scene-adaptive parameters (very similar to rtx dynamic vibrance).
-- Temporal EMA stabilization (avoiding potential artifacts).
-- Dual-scale signal model (safety estimation).
-- Fully continuous response (no switching logic, no more hard boolean separation between gray scales)
-- Designed for real-world messy content like anime encodes, SDR streaming, mixed-quality libraries.
-- Computationally more heavy (but still reasonable).
- 
----
+**PLUS version (`Smart_Vibrance_Plus.txt`):**
+* Scene-adaptive parameters, with a response model conceptually similar to dynamic vibrance systems.
+* Temporal EMA stabilization to reduce frame-to-frame instability.
+* Dual-scale signal model for additional response control.
+* Fully continuous response, with no hard boolean separation between different gray/chroma regions.
+* Better suited anime content encodes, SDR streaming, compressed video, and mixed-quality libraries.
+* More computationally expensive than Base, while remaining relatively lightweight.
 
-##  Best use cases
-- anime (especially compressed / SD upscale)
-- streaming platforms (YouTube, Netflix SDR)
-- washed-out LCD/LED monitors
-- old movies with weak color grading
-- general desktop video playback
+**PRO version (`Smart_vibrance_pro.txt`):**
+* Refactors the boost-balance model around a continuous opponent-color representation.
+* Separates luminance from chroma and evaluates chromatic direction using two opponent-style axes: Red to Green and Yellow to Blue.
+* Uses a continuous hue response across the entire chromatic plane instead of treating all hues equally.
+* Assigns different chroma-response budgets to different chromatic directions, while smoothly interpolating between them.
+* Adds chroma-dependent balancing so low / mid-chroma colors are not automatically treated as candidates for maximum boost.
+* Uses a neutral fallback when chroma is too weak for reliable hue-direction estimation.
+* Preserves the scene-adaptive and temporally stabilized behaviour introduced in PLUS.
+* Designed as a general-purpose adaptive vibrance model for a broad range of content, including film, animation, streaming video, and mixed-quality sources.
+* The goal is not maximum saturation, but **controlled chroma expansion with better distribution of the available boost across hue, chroma strength, scene activity, and temporal stability**.
+* Computationally more demanding than Base and Plus, but still designed specifically around the constraints of a lightweight DirectX 9 / Pixel Shader 3.0 implementation.
+* This version originally aimed to solve the "orange skin" problem wich was evident on the other two generations of shader.
 
 ---
 
