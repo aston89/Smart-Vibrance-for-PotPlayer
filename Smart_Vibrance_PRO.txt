@@ -1,0 +1,526 @@
+// =============================================================================
+// Smart Vibrance PRO
+// -----------------------------------------------------------------------------
+// DirectX 9 / Pixel Shader 3.0
+//
+// Third-generation adaptive vibrance implementation.
+//
+// PRO extends the adaptive boost model used by the previous versions by
+// distributing chroma response continuously across the full opponent-color
+// plane rather than applying the same boost behaviour to every hue.
+//
+// The filter separates luminance from chroma, estimates the current chromatic
+// direction using two opponent-style axes, and assigns a direction-dependent
+// chroma budget.
+//
+// The result is a fully adaptive boost system:
+//
+//     weak chroma     -> can receive stronger enhancement
+//     medium chroma   -> receives moderated enhancement
+//     strong chroma   -> progressively rolls off
+//     neutral colors  -> remain protected
+//
+// Hue response is also balanced continuously:
+//
+//     Red       -> more restrained
+//     Yellow    -> moderately restrained
+//     Green     -> largely preserved
+//     Blue      -> largely preserved
+//
+// Intermediate colours are automatically interpolated between these regions.
+//
+// No skin detector.
+// No scene classifier.
+// No movie/anime logic.
+// No hard hue thresholds.
+// No additional texture samples.
+//
+// The objective is not maximum saturation.
+// The objective is a better distribution of chroma enhancement:
+// increase useful colour separation while avoiding uncontrolled overboost.
+// =============================================================================
+
+sampler s0 : register(s0);
+
+float4 p1    : register(c1);
+float4 pPrev : register(c2);
+
+// =============================================================================
+// PRO RESPONSE MODEL
+// =============================================================================
+// Relative chroma response assigned to the four main opponent directions.
+// Lower value = stronger restraint.
+// Higher value = more of the original boost response is retained.
+// These values form the control points of a continuous hue response rather
+// than four discrete hue classes.
+// Red is intentionally the most restrained region.
+// Yellow is moderately restrained.
+// Green and Blue remain closer to the original response.
+
+#define PRO_RED_RESPONSE        0.50
+#define PRO_YELLOW_RESPONSE     0.68
+#define PRO_GREEN_RESPONSE      0.90
+#define PRO_BLUE_RESPONSE       0.92
+
+
+// Response used when chroma is too small for hue direction to be reliable.
+// Near the neutral axis, hue becomes numerically unstable and perceptually ambiguous.
+// Instead of forcing a hue decision, PRO falls back to this conservative neutral response.
+#define PRO_NEUTRAL_RESPONSE    0.58
+
+
+// -----------------------------------------------------------------------------
+// Chroma range used for adaptive balancing.
+//
+// Below PRO_CHROMA_START:
+//     strong adaptive protection.
+//
+// Between START and END:
+//     protection gradually fades.
+//
+// Above PRO_CHROMA_END:
+//     the original saturation rolloff dominates.
+//
+// This prevents low-chroma material from automatically receiving the same
+// aggressive boost that would be useful on clearly defined colours.
+#define PRO_CHROMA_START        0.075
+#define PRO_CHROMA_END          0.26
+
+
+// =============================================================================
+// BASIC UTILITY
+// =============================================================================
+
+// Smooth nonlinear response curve.
+float sigmoid(float x)
+{
+    return 1.0 / (1.0 + exp(-x));
+}
+
+
+// Exponential moving average used to stabilize scene-level measurements.
+//
+// Lower lambda:
+//     slower response / stronger temporal smoothing.
+//
+// Higher lambda:
+//     faster response / less smoothing.
+
+float ema(float prev, float current, float lambda)
+{
+    float a = 1.0 - exp(-lambda);
+
+    return lerp(
+        prev,
+        current,
+        a
+    );
+}
+
+// =============================================================================
+// CONTINUOUS HUE RESPONSE
+// =============================================================================
+//
+// The chromatic plane is represented using two inexpensive opponent-style
+// coordinates:
+//
+//     A = Red  <-> Green
+//     B = Yellow <-> Blue
+//
+// These are not a full perceptual colour-space conversion. They are a
+// lightweight directional representation suitable for a DX9 / PS_3_0 shader.
+//
+// The four main directional responses act as control points:
+//
+//                  Yellow
+//                     |
+//                     |
+//          Green -----+----- Red
+//                     |
+//                     |
+//                   Blue
+//
+// Mixed colours are automatically interpolated.
+//
+// Examples:
+//
+//     Orange      -> Red + Yellow
+//     Magenta     -> Red + Blue
+//     Cyan        -> Green + Blue
+//     Yellow-Green-> Yellow + Green
+//
+// Therefore every hue receives a continuous response rather than entering a
+// binary protected/unprotected category.
+// =============================================================================
+
+float HueResponse(
+    float a,
+    float b)
+{
+    // Positive A = red.
+    float redWeight =
+        max(a, 0.0);
+
+    // Negative A = green.
+    float greenWeight =
+        max(-a, 0.0);
+
+    // Positive B = yellow.
+    float yellowWeight =
+        max(b, 0.0);
+
+    // Negative B = blue.
+    float blueWeight =
+        max(-b, 0.0);
+
+    float total =
+        redWeight +
+        greenWeight +
+        yellowWeight +
+        blueWeight +
+        1e-5;
+
+    float response =
+        (
+            redWeight    * PRO_RED_RESPONSE +
+            yellowWeight * PRO_YELLOW_RESPONSE +
+            greenWeight  * PRO_GREEN_RESPONSE +
+            blueWeight   * PRO_BLUE_RESPONSE
+        ) / total;
+
+    return response;
+}
+
+// =============================================================================
+// COLOR ADJUSTMENT
+// =============================================================================
+
+float3 AdjustColor(
+    float3 color,
+    float intensity,
+    float sceneActivity)
+{
+
+    // -------------------------------------------------------------------------
+    // Perceptual luminance
+    // The luminance component is preserved while chroma is adjusted
+    // independently.
+    // -------------------------------------------------------------------------
+
+    float luminance =
+        dot(
+            color,
+            float3(
+                0.2126,
+                0.7152,
+                0.0722
+            )
+        );
+
+    // -------------------------------------------------------------------------
+    // Opponent-style chroma coordinates
+    //
+    // A:
+    //     positive = red
+    //     negative = green
+    //
+    // B:
+    //     positive = yellow
+    //     negative = blue
+    //
+    // These coordinates provide a cheap directional chroma representation
+    // without requiring a full perceptual colour-space conversion.
+    // -------------------------------------------------------------------------
+
+    float A =
+        color.r -
+        color.g;
+
+    float B =
+        (color.r + color.g) * 0.5 -
+        color.b;
+
+    // -------------------------------------------------------------------------
+    // Chroma magnitude
+    // Measures how far the colour lies from the neutral axis in the reduced
+    // opponent plane.
+    // -------------------------------------------------------------------------
+
+    float chromaEnergy =
+        A * A +
+        B * B;
+
+    float chromaMag =
+        sqrt(chromaEnergy);
+
+    // -------------------------------------------------------------------------
+    // Scene-adaptive parameters
+    // The saturation reference expands as scene activity increases, allowing
+    // the response curve to adapt instead of using one fixed saturation
+    // threshold for every frame.
+    // -------------------------------------------------------------------------
+
+    float satRef =
+        lerp(
+            0.35,
+            0.65,
+            sceneActivity
+        );
+
+    float grayRef =
+        lerp(
+            0.006,
+            0.0015,
+            sceneActivity
+        );
+
+    // -------------------------------------------------------------------------
+    // Nonlinear chroma rolloff
+    // Weak colours receive more available boost.
+    // Increasingly strong colours progressively consume that boost budget.
+    // -------------------------------------------------------------------------
+
+    float normSat =
+        saturate(
+            chromaMag / satRef
+        );
+
+    float rolloff =
+        1.0 - normSat;
+
+
+    // -------------------------------------------------------------------------
+    // Near-neutral protection
+    // Colours close to the neutral axis receive a controlled fallback response
+    // rather than being allowed to inherit the maximum boost.
+    // -------------------------------------------------------------------------
+
+    float graySoft =
+        sigmoid(
+            (grayRef - chromaEnergy) * 45.0
+        );
+
+    float response =
+        lerp(
+            rolloff,
+            1.0,
+            graySoft
+        );
+
+    // =========================================================================
+    // CONTINUOUS HUE BALANCING
+    // =========================================================================
+    // Hue direction is useful only when enough chroma is present to make that
+    // direction meaningful. Very weak chroma therefore blends toward the
+    // neutral fallback response.
+    // =========================================================================
+
+    float hueConfidence =
+        saturate(
+            chromaMag / 0.020
+        );
+
+    float hueResponse =
+        HueResponse(
+            A,
+            B
+        );
+
+    float balancedResponse =
+        lerp(
+            PRO_NEUTRAL_RESPONSE,
+            hueResponse,
+            hueConfidence
+        );
+
+    // =========================================================================
+    // CHROMA-DEPENDENT BOOST BALANCING
+    // =========================================================================
+    // The directional response is strongest where chroma is weak or moderate.
+    // As chroma increases, the balancing influence progressively disappears and the original nonlinear saturation rolloff becomes dominant again.
+    // This prevents the filter from treating every low-saturation colour as an opportunity for maximum enhancement.
+    // =========================================================================
+
+    float chromaPosition =
+        saturate(
+            (chromaMag - PRO_CHROMA_START) /
+            max(
+                PRO_CHROMA_END -
+                PRO_CHROMA_START,
+                1e-5
+            )
+        );
+
+    float chromaFade =
+        1.0 -
+        chromaPosition;
+
+    // Smooth the transition to avoid visible response boundaries.
+    chromaFade =
+        chromaFade *
+        chromaFade *
+        (3.0 - 2.0 * chromaFade);
+
+    // -------------------------------------------------------------------------
+    // Calculate how far the directional response is from full boost.
+    // balancedResponse = 1.0 (no additional restriction)
+    // balancedResponse = 0.50 (strongly moderated chroma response)
+    // -------------------------------------------------------------------------
+
+    float protection =
+        chromaFade *
+        (
+            1.0 -
+            balancedResponse
+        );
+
+
+    // Apply the directional balance to the original adaptive response.
+    response *=
+        1.0 -
+        protection;
+
+
+    // -------------------------------------------------------------------------
+    // Final adaptive chroma gain
+    // -------------------------------------------------------------------------
+
+    float gain =
+        (intensity - 1.0) *
+        response;
+
+
+    // Reconstruct RGB from the original luminance and adjusted chroma.
+    // Because chroma is scaled rather than independently modifying RGB channels, the hue direction itself is preserved while its intensity is controlled adaptively.
+    return
+        luminance +
+        (color - luminance) +
+        (color - luminance) * gain;
+}
+
+// =============================================================================
+// MAIN
+// =============================================================================
+
+float4 main(float2 texCoord : TEXCOORD0) : COLOR
+{
+    // -------------------------------------------------------------------------
+    // Input frame
+    // -------------------------------------------------------------------------
+
+    float4 inputColor =
+        tex2D(
+            s0,
+            texCoord
+        );
+
+    float3 color =
+        inputColor.rgb;
+
+    // -------------------------------------------------------------------------
+    // Current luminance
+    // -------------------------------------------------------------------------
+
+    float luminance =
+        dot(
+            color,
+            float3(
+                0.2126,
+                0.7152,
+                0.0722
+            )
+        );
+
+
+    // -------------------------------------------------------------------------
+    // Current chroma energy
+    // -------------------------------------------------------------------------
+
+    float3 chroma =
+        color -
+        luminance;
+
+    float chromaEnergy =
+        dot(
+            chroma,
+            chroma
+        );
+
+    // =========================================================================
+    // SCENE ACTIVITY
+    // =========================================================================
+    // Provides a slow-changing estimate of the chromatic character of the
+    // current scene.
+    // =========================================================================
+
+    float sceneActivityRaw =
+        saturate(
+            chromaEnergy * 10.0
+        );
+
+    float sceneActivity =
+        ema(
+            pPrev.x,
+            sceneActivityRaw,
+            0.08
+        );
+
+
+    // =========================================================================
+    // MICRO ACTIVITY
+    // =========================================================================
+    // Faster temporal estimate used to detect unstable chroma behaviour such as compression variation, noisy colour regions, or rapidly changing boosted material.
+    // =========================================================================
+
+    float microActivity =
+        ema(
+            pPrev.y,
+            chromaEnergy,
+            0.25
+        );
+
+
+    // -------------------------------------------------------------------------
+    // Stability compensation
+    // Reduce the effective boost when the recent chroma signal is unstable.
+    // -------------------------------------------------------------------------
+
+    float stabilityBoost =
+        1.0 -
+        saturate(
+            microActivity * 5.0
+        );
+
+
+    // =========================================================================
+    // ADAPTIVE INTENSITY
+    // =========================================================================
+    // Base intensity remains high, while scene activity and temporal stability continuously modulate how much of it reaches the chroma response stage.
+    // =========================================================================
+
+    float intensity =
+        2.0 *
+        lerp(
+            0.85,
+            1.0,
+            sceneActivity
+        ) *
+        stabilityBoost;
+
+    // -------------------------------------------------------------------------
+    // Final adaptive colour adjustment
+    // -------------------------------------------------------------------------
+
+    float3 outColor =
+        AdjustColor(
+            color,
+            intensity,
+            sceneActivity
+        );
+
+
+    return float4(
+        outColor,
+        inputColor.a
+    );
+}
