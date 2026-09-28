@@ -63,7 +63,7 @@ This prevents:
 - loss of detail in low-light scenes
 - flat anime frames breaking apart
 
-**3. temporal stability (PLUS version)**
+**3. temporal stability (Plus/PRO version)**
 Scene analysis is smoothed over time using EMA.
 This eliminates:
 - frame-to-frame flicker
