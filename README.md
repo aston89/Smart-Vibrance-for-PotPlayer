@@ -79,7 +79,7 @@ Result: stable even under aggressive frame boosting pipelines (svp, dmitri-rende
 
 ## Difference between Base vs Plus vs PRO logic
 
-**Base version (`Smart_vibrance.txt`):**
+**Base version (`Smart_Vibrance.txt`):**
 * Hard gating thresholds used on gray / low-chroma colors.
 * Simple gradual rolloff curve for already saturated colors.
 * No temporal smoothing.
@@ -95,7 +95,7 @@ Result: stable even under aggressive frame boosting pipelines (svp, dmitri-rende
 * Better suited anime content encodes, SDR streaming, compressed video, and mixed-quality libraries.
 * More computationally expensive than Base, while remaining relatively lightweight.
 
-**PRO version (`Smart_vibrance_pro.txt`):**
+**PRO version (`Smart_Vibrance_PRO.txt`):**
 * Refactors the boost-balance model around a continuous opponent-color representation.
 * Separates luminance from chroma and evaluates chromatic direction using two opponent-style axes: Red to Green and Yellow to Blue.
 * Uses a continuous hue response across the entire chromatic plane instead of treating all hues equally.
