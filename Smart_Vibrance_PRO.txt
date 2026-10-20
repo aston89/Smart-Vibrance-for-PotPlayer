@@ -1,49 +1,27 @@
 // =============================================================================
-// Smart Vibrance PRO
+// Smart Vibrance PRO v2.0
 // -----------------------------------------------------------------------------
 // DirectX 9 / Pixel Shader 3.0
 //
-// Third-generation adaptive vibrance implementation.
+// This revision removes the previous-frame EMA assumption: pPrev was read from
+// a host-supplied constant register, but the pixel shader could not update that
+// register with measurements from the current frame. The former temporal
+// stabilization therefore depended on state that was not reliably available.
 //
-// PRO extends the adaptive boost model used by the previous versions by
-// distributing chroma response continuously across the full opponent-color
-// plane rather than applying the same boost behaviour to every hue.
+// v2.0 replaces that path with stateless per-pixel activity and chroma
+// calculations, preserving the former zero-history response, and adds a
+// low-light / low-chroma guard to reduce excessive enhancement of compression
+// noise in dark, weakly chromatic regions.
 //
-// The filter separates luminance from chroma, estimates the current chromatic
-// direction using two opponent-style axes, and assigns a direction-dependent
-// chroma budget.
+// The guard is a perceptual approximation, not temporal stabilization. Genuine
+// frame-to-frame EMA requires persistent history supplied by the host.
 //
-// The result is a fully adaptive boost system:
-//
-//     weak chroma     -> can receive stronger enhancement
-//     medium chroma   -> receives moderated enhancement
-//     strong chroma   -> progressively rolls off
-//     neutral colors  -> remain protected
-//
-// Hue response is also balanced continuously:
-//
-//     Red       -> more restrained
-//     Yellow    -> moderately restrained
-//     Green     -> largely preserved
-//     Blue      -> largely preserved
-//
-// Intermediate colours are automatically interpolated between these regions.
-//
-// No skin detector.
-// No scene classifier.
-// No movie/anime logic.
-// No hard hue thresholds.
-// No additional texture samples.
-//
-// The objective is not maximum saturation.
-// The objective is a better distribution of chroma enhancement:
-// increase useful colour separation while avoiding uncontrolled overboost.
+// The PRO hue-response model remains intact: chroma enhancement is balanced
+// continuously across the opponent-color plane, with restrained red/yellow
+// response, more preserved green/blue response, and protection near neutral.
 // =============================================================================
 
 sampler s0 : register(s0);
-
-float4 p1    : register(c1);
-float4 pPrev : register(c2);
 
 // =============================================================================
 // PRO RESPONSE MODEL
@@ -62,12 +40,10 @@ float4 pPrev : register(c2);
 #define PRO_GREEN_RESPONSE      0.90
 #define PRO_BLUE_RESPONSE       0.92
 
-
 // Response used when chroma is too small for hue direction to be reliable.
 // Near the neutral axis, hue becomes numerically unstable and perceptually ambiguous.
 // Instead of forcing a hue decision, PRO falls back to this conservative neutral response.
 #define PRO_NEUTRAL_RESPONSE    0.58
-
 
 // -----------------------------------------------------------------------------
 // Chroma range used for adaptive balancing.
@@ -86,6 +62,17 @@ float4 pPrev : register(c2);
 #define PRO_CHROMA_START        0.075
 #define PRO_CHROMA_END          0.26
 
+// =============================================================================
+// LOW-LIGHT / LOW-CHROMA GUARD
+// =============================================================================
+// Stateless protection against excessive chroma enhancement in dark regions
+// with weak chroma. This is not frame-to-frame stabilization.
+
+#define PRO_STABILITY_GUARD_STRENGTH 0.20
+#define PRO_CHROMA_RISK_START        0.0015
+#define PRO_CHROMA_RISK_END          0.0150
+#define PRO_SHADOW_RISK_START        0.0200
+#define PRO_SHADOW_RISK_END          0.1600
 
 // =============================================================================
 // BASIC UTILITY
@@ -98,24 +85,13 @@ float sigmoid(float x)
 }
 
 
-// Exponential moving average used to stabilize scene-level measurements.
-//
-// Lower lambda:
-//     slower response / stronger temporal smoothing.
-//
-// Higher lambda:
-//     faster response / less smoothing.
-
-float ema(float prev, float current, float lambda)
+// Smooth 0..1 transition.
+float smooth01(float x, float edge0, float edge1)
 {
-    float a = 1.0 - exp(-lambda);
-
-    return lerp(
-        prev,
-        current,
-        a
-    );
+    float t = saturate((x - edge0) / max(edge1 - edge0, 1e-5));
+    return t * t * (3.0 - 2.0 * t);
 }
+
 
 // =============================================================================
 // CONTINUOUS HUE RESPONSE
@@ -198,7 +174,7 @@ float HueResponse(
 float3 AdjustColor(
     float3 color,
     float intensity,
-    float sceneActivity)
+    float pixelActivity)
 {
 
     // -------------------------------------------------------------------------
@@ -254,24 +230,24 @@ float3 AdjustColor(
         sqrt(chromaEnergy);
 
     // -------------------------------------------------------------------------
-    // Scene-adaptive parameters
-    // The saturation reference expands as scene activity increases, allowing
-    // the response curve to adapt instead of using one fixed saturation
-    // threshold for every frame.
+    // Pixel-adaptive parameters
+    // The saturation reference expands with the current pixel's activity,
+    // allowing the response curve to adapt instead of using one fixed
+    // saturation threshold for every pixel.
     // -------------------------------------------------------------------------
 
     float satRef =
         lerp(
             0.35,
             0.65,
-            sceneActivity
+            pixelActivity
         );
 
     float grayRef =
         lerp(
             0.006,
             0.0015,
-            sceneActivity
+            pixelActivity
         );
 
     // -------------------------------------------------------------------------
@@ -337,8 +313,10 @@ float3 AdjustColor(
     // CHROMA-DEPENDENT BOOST BALANCING
     // =========================================================================
     // The directional response is strongest where chroma is weak or moderate.
-    // As chroma increases, the balancing influence progressively disappears and the original nonlinear saturation rolloff becomes dominant again.
-    // This prevents the filter from treating every low-saturation colour as an opportunity for maximum enhancement.
+    // As chroma increases, the balancing influence progressively disappears and
+    // the original nonlinear saturation rolloff becomes dominant again.
+    // This prevents the filter from treating every low-saturation colour as an
+    // opportunity for maximum enhancement.
     // =========================================================================
 
     float chromaPosition =
@@ -379,7 +357,6 @@ float3 AdjustColor(
     response *=
         1.0 -
         protection;
-
 
     // -------------------------------------------------------------------------
     // Final adaptive chroma gain
@@ -447,55 +424,71 @@ float4 main(float2 texCoord : TEXCOORD0) : COLOR
         );
 
     // =========================================================================
-    // SCENE ACTIVITY
+    // PIXEL ACTIVITY
     // =========================================================================
-    // Provides a slow-changing estimate of the chromatic character of the
-    // current scene.
+    // Uses the current pixel only. The coefficient below preserves the former
+    // EMA's response when its unavailable previous-state input was zero; it is
+    // not a temporally smoothed or frame-wide scene measurement.
     // =========================================================================
 
-    float sceneActivityRaw =
+    float pixelActivityRaw =
         saturate(
             chromaEnergy * 10.0
         );
 
-    float sceneActivity =
-        ema(
-            pPrev.x,
-            sceneActivityRaw,
-            0.08
-        );
+    float pixelActivity =
+        pixelActivityRaw *
+        (1.0 - exp(-0.08));
 
 
     // =========================================================================
-    // MICRO ACTIVITY
+    // INSTANTANEOUS CHROMA GUARD
     // =========================================================================
-    // Faster temporal estimate used to detect unstable chroma behaviour such as compression variation, noisy colour regions, or rapidly changing boosted material.
+    // Replaces the former microActivity EMA using the equivalent zero-history
+    // weighting. It reacts only to the current pixel and retains no frame state.
     // =========================================================================
 
-    float microActivity =
-        ema(
-            pPrev.y,
-            chromaEnergy,
-            0.25
-        );
-
-
-    // -------------------------------------------------------------------------
-    // Stability compensation
-    // Reduce the effective boost when the recent chroma signal is unstable.
-    // -------------------------------------------------------------------------
-
-    float stabilityBoost =
+    float instantaneousChromaGuard =
         1.0 -
         saturate(
-            microActivity * 5.0
+            chromaEnergy *
+            (1.0 - exp(-0.25)) *
+            5.0
         );
 
+    // =========================================================================
+    // LOW-LIGHT / LOW-CHROMA GUARD
+    // =========================================================================
+    // Further reduces chroma enhancement in dark regions with weak chroma,
+    // where compression noise can become conspicuous after enhancement.
+    // This is a stateless perceptual approximation, not frame-to-frame analysis.
+    // =========================================================================
+
+    float lowChromaRisk =
+        1.0 - smooth01(
+            chromaEnergy,
+            PRO_CHROMA_RISK_START,
+            PRO_CHROMA_RISK_END
+        );
+
+    float shadowRisk =
+        1.0 - smooth01(
+            saturate(luminance),
+            PRO_SHADOW_RISK_START,
+            PRO_SHADOW_RISK_END
+        );
+
+    float lowLightChromaGuard =
+        1.0 -
+        PRO_STABILITY_GUARD_STRENGTH *
+        lowChromaRisk *
+        shadowRisk;
 
     // =========================================================================
     // ADAPTIVE INTENSITY
     // =========================================================================
-    // Base intensity remains high, while scene activity and temporal stability continuously modulate how much of it reaches the chroma response stage.
+    // The former zero-history response is retained, then modulated by the
+    // low-light / low-chroma guard. No previous-frame state is assumed.
     // =========================================================================
 
     float intensity =
@@ -503,9 +496,10 @@ float4 main(float2 texCoord : TEXCOORD0) : COLOR
         lerp(
             0.85,
             1.0,
-            sceneActivity
+            pixelActivity
         ) *
-        stabilityBoost;
+        instantaneousChromaGuard *
+        lowLightChromaGuard;
 
     // -------------------------------------------------------------------------
     // Final adaptive colour adjustment
@@ -515,9 +509,8 @@ float4 main(float2 texCoord : TEXCOORD0) : COLOR
         AdjustColor(
             color,
             intensity,
-            sceneActivity
+            pixelActivity
         );
-
 
     return float4(
         outColor,
