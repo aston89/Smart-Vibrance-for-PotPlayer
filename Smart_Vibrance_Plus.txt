@@ -1,47 +1,58 @@
+/*
+    Smart Vibrance Plus v2.0 — PotPlayer
+
+    This revision corrects the previous version's temporal-stabilization
+    assumption: pPrev, read from c2, is a host-supplied constant that the
+    pixel shader cannot update to retain the previous frame's state.
+    Consequently, the original EMA formula cannot provide reliable
+    frame-to-frame stabilization without an external history mechanism.
+
+    v2.0 preserves the previous formula's zero-history response and adds
+    a stateless low-light, low-chroma guard intended to reduce excessive
+    chroma enhancement of compression noise.
+
+    The new guard is a perceptual approximation, not a true temporal EMA.
+    Genuine temporal stabilization requires persistent frame history
+    managed by the host or an accessible previous-frame texture.
+*/
+
 sampler s0 : register(s0);
 float4 p1 : register(c1);
 
-// previous frame state (must persist between frames)
-float4 pPrev : register(c2);
+#define PLUS_STABILITY_GUARD_STRENGTH 0.20
+#define PLUS_CHROMA_RISK_START       0.0015
+#define PLUS_CHROMA_RISK_END         0.0150
+#define PLUS_SHADOW_RISK_START       0.0200
+#define PLUS_SHADOW_RISK_END         0.1600
 
-// basic utility
 float sigmoid(float x)
 {
     return 1.0 / (1.0 + exp(-x));
 }
 
-// exponential smoothing for temporal stability
-float ema(float prev, float current, float lambda)
+float smooth01(float x, float edge0, float edge1)
 {
-    float a = 1.0 - exp(-lambda);
-    return lerp(prev, current, a);
+    float t = saturate((x - edge0) / max(edge1 - edge0, 1e-5));
+    return t * t * (3.0 - 2.0 * t);
 }
 
-float3 AdjustColor(float3 color, float intensity, float sceneActivity)
+float3 AdjustColor(float3 color, float intensity, float pixelActivity)
 {
-    // perceptual luminance
     float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
 
-    // chroma component
     float3 chroma = color - luminance;
-
     float chromaEnergy = dot(chroma, chroma);
     float chromaMag = sqrt(chromaEnergy);
 
-    // scene adaptive parameters
-    float satRef  = lerp(0.35, 0.65, sceneActivity);
-    float grayRef = lerp(0.006, 0.0015, sceneActivity);
+    float satRef  = lerp(0.35, 0.65, pixelActivity);
+    float grayRef = lerp(0.006, 0.0015, pixelActivity);
 
-    // saturation rolloff based on existing chroma
     float normSat = saturate(chromaMag / satRef);
     float rolloff = 1.0 - normSat;
 
-    // smooth protection for near-neutral colors
     float graySoft = sigmoid((grayRef - chromaEnergy) * 45.0);
-
     float response = lerp(rolloff, 1.0, graySoft);
 
-    // intensity scaling
     float gain = (intensity - 1.0) * response;
 
     return luminance + chroma + chroma * gain;
@@ -49,30 +60,42 @@ float3 AdjustColor(float3 color, float intensity, float sceneActivity)
 
 float4 main(float2 texCoord : TEXCOORD) : SV_TARGET
 {
-    // sample input frame
     float4 inputColor = tex2D(s0, texCoord);
-
     float3 color = inputColor.rgb;
 
     float luminance = dot(color, float3(0.2126, 0.7152, 0.0722));
-    float chromaEnergy = dot(color - luminance, color - luminance);
+    float3 chroma = color - luminance;
+    float chromaEnergy = dot(chroma, chroma);
 
-    // fast scene activity estimate
-    float sceneActivityRaw = saturate(chromaEnergy * 10.0);
+    float pixelActivityRaw = saturate(chromaEnergy * 10.0);
+    float pixelActivity = pixelActivityRaw * (1.0 - exp(-0.08));
 
-    // smoothed scene response
-    float sceneActivity = ema(pPrev.x, sceneActivityRaw, 0.08);
+    float instantaneousChromaGuard =
+        1.0 - saturate(chromaEnergy * (1.0 - exp(-0.25)) * 5.0);
 
-    // micro instability / compression noise estimate
-    float microActivity = ema(pPrev.y, chromaEnergy, 0.25);
+    float lowChromaRisk = 1.0 - smooth01(
+        chromaEnergy,
+        PLUS_CHROMA_RISK_START,
+        PLUS_CHROMA_RISK_END
+    );
 
-    // stability compensation for compressed or boosted input
-    float stabilityBoost = 1.0 - saturate(microActivity * 5.0);
+    float shadowRisk = 1.0 - smooth01(
+        saturate(luminance),
+        PLUS_SHADOW_RISK_START,
+        PLUS_SHADOW_RISK_END
+    );
 
-    // final adaptive intensity
-    float intensity = 2.0 * lerp(0.85, 1.0, sceneActivity) * stabilityBoost;
+    float lowLightChromaGuard =
+        1.0 - PLUS_STABILITY_GUARD_STRENGTH *
+        lowChromaRisk * shadowRisk;
 
-    float3 outColor = AdjustColor(color, intensity, sceneActivity);
+    float intensity =
+        2.0 *
+        lerp(0.85, 1.0, pixelActivity) *
+        instantaneousChromaGuard *
+        lowLightChromaGuard;
+
+    float3 outColor = AdjustColor(color, intensity, pixelActivity);
 
     return float4(outColor, inputColor.a);
 }
