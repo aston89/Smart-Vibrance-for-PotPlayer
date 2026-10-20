@@ -165,7 +165,7 @@ The result depends on the source material, renderer, video levels, display, and 
 Place the desired shader file in:
 `PotPlayer/pxshader/`
 Select and enable it through the player's pixel-shader controls. Exact menu locations may vary between PotPlayer versions and compatible forks.
-Usare with other medie players : change the `.txt`  into `.hlsl`
+for other media players change the `.txt`  into `.hlsl`
 
 ---
 
